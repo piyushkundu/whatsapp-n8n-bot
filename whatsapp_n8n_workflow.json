@@ -1,0 +1,154 @@
+{
+    "active": true,
+    "nodes": [
+        {
+            "parameters": {
+                "path": "whatsapp",
+                "responseMode": "lastNode",
+                "options": {},
+                "httpMethod": "POST"
+            },
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ],
+            "id": "webhook-node",
+            "name": "WhatsApp Webhook"
+        },
+        {
+            "parameters": {
+                "jsCode": "const body = $input.item.json.body || {};\nconst userText = body.userText || \"Hello\";\nconst history = body.history || [];\n\nconst systemMessage = {\n  role: \"system\",\n  content: \"You are a polite, intelligent, and friendly Personal Assistant for a Computer Teacher in India.\\n\\nCONTEXT:\\n- 'Courses' specifically refers to **NIELIT O-Level** and **CCC** (Course on Computer Concepts).\\n- Focus on Indian education context.\\n\\nCRITICAL LANGUAGE RULES:\\n1. **ENGLISH**: If user speaks English, reply in **English**.\\n2. **HINDI/HINGLISH**: If user speaks Hindi, reply in **Hinglish** (Hindi written in English script).\\n\\nBEHAVIOR & RULES:\\n1. **GREETINGS (Hi, Hello, Namaste)**:\\n   - IF the user ONLY says 'Hi', 'Hello', etc.:\\n   - Reply SPECIFICALLY: \\\"Namaste! 🙏 How can I help you?\\\" (or Hinglish: \\\"Namaste! 🙏 Main aapki kaise madad kar sakta hoon?\\\" if user used Hindi greeting).\\n   - Do NOT add anything else.\\n\\n2. **GENERAL QUERIES & FOLLOW-UPS**:\\n   - If the user asks a question (e.g., 'What is CCC?', 'Syllabus?'), answer it helpfully with CURRENT information.\\n   - USE CONTEXT: If the user asks 'What is its fee?' immediately after 'CCC', assume they mean 'CCC Fee'.\\n\\n3. **PERSONAL/TEACHER TASKS** (Fees, Admissions, Call me):\\n   - Reply: \\\"Namaste! 🙏 Sir will personally reply to you regarding this as soon as he is free.\\\"\\n\\n4. **TONE**:\\n   - Very polite, respectful, and encouraging.\" \n};\n\nconst messages = [systemMessage, ...history];\n\nconst payload = {\n  model: \"llama-3.3-70b-versatile\",\n  messages: messages\n};\n\nreturn {\n  json: {\n    payloadString: JSON.stringify(payload)\n  }\n};"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                450,
+                300
+            ],
+            "id": "prepare-payload",
+            "name": "Prepare Payload"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.groq.com/openai/v1/chat/completions",
+                "authentication": "none",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer {{ $env.GROQ_API_KEY }}"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "raw",
+                "rawContentType": "application/json",
+                "body": "={{ $json.payloadString }}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                650,
+                300
+            ],
+            "id": "groq-api",
+            "name": "Groq API"
+        },
+        {
+            "parameters": {
+                "jsCode": "const senderId = $node[\"WhatsApp Webhook\"].json.body.senderId;\nconst text = $input.item.json.choices[0].message.content;\n\nreturn {\n  json: {\n    senderId: senderId,\n    text: text\n  }\n};"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 1,
+            "position": [
+                850,
+                300
+            ],
+            "id": "prepare-reply",
+            "name": "Prepare Reply"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://127.0.0.1:3000/send",
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "senderId",
+                            "value": "={{ $json.senderId }}"
+                        },
+                        {
+                            "name": "text",
+                            "value": "={{ $json.text }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 3,
+            "position": [
+                1050,
+                300
+            ],
+            "id": "send-reply",
+            "name": "Send Reply via Bridge"
+        }
+    ],
+    "connections": {
+        "WhatsApp Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Groq API",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Groq API": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Reply",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Reply": {
+            "main": [
+                [
+                    {
+                        "node": "Send Reply via Bridge",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

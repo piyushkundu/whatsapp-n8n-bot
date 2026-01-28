@@ -1,0 +1,24 @@
+{
+  "name": "notered",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "chmod +x render_start.sh && ./render_start.sh"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "axios": "^1.13.3",
+    "body-parser": "^2.2.2",
+    "express": "^5.2.1",
+    "node-red-contrib-whatsapp-link": "^0.1.39-C",
+    "node-red-dashboard": "^3.6.6",
+    "pino": "^10.3.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
