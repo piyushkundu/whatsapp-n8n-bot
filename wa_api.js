@@ -100,6 +100,11 @@ async function connectToWhatsApp() {
     });
 }
 
+// Health Check Endpoint (For UptimeRobot)
+app.get('/', (req, res) => {
+    res.send('Bot is Alive! 🟢');
+});
+
 // API to Send Message (Called by n8n)
 app.post('/send', async (req, res) => {
     const { senderId, text } = req.body;
