@@ -4,24 +4,42 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const qrcodeTerminal = require('qrcode-terminal');
-const pino = require('pino');
-const fs = require('fs');
-
-const app = express();
-app.use(bodyParser.json());
-
-const PORT = process.env.PORT || 3000;
-const N8N_WEBHOOK_URL = 'http://127.0.0.1:5678/webhook/whatsapp';
+const QRCode = require('qrcode'); // Re-added for Web View
+// ...
 
 let sock;
 const chatHistory = {};
+let currentQR = null; // Store QR for Web View
+
+// Health Check Endpoint
+app.get('/', (req, res) => {
+    res.send('Bot is Alive! 🟢 <br> <a href="/qr">Scan QR Code</a>');
+});
+
+// Web QR Code Endpoint
+app.get('/qr', async (req, res) => {
+    if (!currentQR) {
+        return res.send('<html><body><h1>No QR Code Generated Yet</h1><p>Wait for a few seconds or check if already connected.</p><script>setTimeout(() => location.reload(), 5000);</script></body></html>');
+    }
+    try {
+        const url = await QRCode.toDataURL(currentQR);
+        res.send(`<html><body style="text-align:center; padding-top:50px;">
+            <h1>Scan this QR Code</h1>
+            <img src="${url}" style="width:300px; height:300px; border:1px solid #ccc;"/>
+            <p>Reloading in 5 seconds...</p>
+            <script>setTimeout(() => location.reload(), 5000);</script>
+        </body></html>`);
+    } catch (err) {
+        res.status(500).send('Error generating QR');
+    }
+});
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
     sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false, // We use qrcode-terminal manually
+        printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
         browser: ["Windows", "Chrome", "10.0.0"]
     });
@@ -32,23 +50,14 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
+            currentQR = qr; // Save for Web View
             console.log('\nScan the QR Code below to connect:\n');
             qrcodeTerminal.generate(qr, { small: true });
             console.log('QR Code printed above. Please scan it with WhatsApp.');
         }
 
-        if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error instanceof Boom) ?
-                lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut : true;
-
-            console.log('Connection closed due to ', lastDisconnect.error, ', reconnecting: ', shouldReconnect);
-
-            if (shouldReconnect) {
-                connectToWhatsApp();
-            } else {
-                console.log("Logged out. Delete 'auth_info_baileys' folder and restart to scan again.");
-            }
-        } else if (connection === 'open') {
+        if (connection === 'open') {
+            currentQR = null; // Clear QR on connection
             console.log('✅ WhatsApp Connected!');
         }
     });
