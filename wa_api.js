@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode'); // Re-added for Web View
+const pino = require('pino');
 // ...
 
 let sock;
