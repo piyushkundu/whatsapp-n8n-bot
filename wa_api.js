@@ -3,7 +3,7 @@ const { Boom } = require('@hapi/boom');
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const QRCodeFile = require('qrcode');
+const qrcodeTerminal = require('qrcode-terminal');
 const pino = require('pino');
 const fs = require('fs');
 
@@ -21,7 +21,7 @@ async function connectToWhatsApp() {
 
     sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true,
+        printQRInTerminal: false, // We use qrcode-terminal manually
         logger: pino({ level: 'silent' }),
         browser: ["Windows", "Chrome", "10.0.0"]
     });
@@ -33,8 +33,8 @@ async function connectToWhatsApp() {
 
         if (qr) {
             console.log('\nScan the QR Code below to connect:\n');
-            QRCodeFile.toFile('qr.png', qr);
-            console.log('QR Code saved to qr.png - Open this file to scan!');
+            qrcodeTerminal.generate(qr, { small: true });
+            console.log('QR Code printed above. Please scan it with WhatsApp.');
         }
 
         if (connection === 'close') {
@@ -52,8 +52,6 @@ async function connectToWhatsApp() {
             console.log('✅ WhatsApp Connected!');
         }
     });
-
-
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         try {
@@ -89,7 +87,7 @@ async function connectToWhatsApp() {
                         senderId: sender,
                         userText: text,
                         name: m.pushName || "User",
-                        history: chatHistory[sender] // Send full history
+                        history: chatHistory[sender]
                     });
                     console.log('   -> Forwarded to n8n');
                 } catch (err) {

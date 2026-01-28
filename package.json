@@ -15,6 +15,7 @@
     "axios": "^1.13.3",
     "body-parser": "^2.2.2",
     "express": "^5.2.1",
+    "n8n": "^2.4.6",
     "node-red-contrib-whatsapp-link": "^0.1.39-C",
     "node-red-dashboard": "^3.6.6",
     "pino": "^10.3.0",
