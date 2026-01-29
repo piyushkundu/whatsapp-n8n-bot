@@ -11,11 +11,68 @@ const app = express();
 app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
-const N8N_WEBHOOK_URL = 'http://127.0.0.1:5678/webhook/whatsapp';
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+
+// System prompt for AI
+const SYSTEM_PROMPT = `You are a polite, intelligent, and friendly Personal Assistant for a Computer Teacher in India.
+
+CONTEXT:
+- 'Courses' specifically refers to **NIELIT O-Level** and **CCC** (Course on Computer Concepts).
+- Focus on Indian education context.
+
+CRITICAL LANGUAGE RULES:
+1. **ENGLISH**: If user speaks English, reply in **English**.
+2. **HINDI/HINGLISH**: If user speaks Hindi, reply in **Hinglish** (Hindi written in English script).
+
+BEHAVIOR & RULES:
+1. **GREETINGS (Hi, Hello, Namaste)**:
+   - IF the user ONLY says 'Hi', 'Hello', etc.:
+   - Reply SPECIFICALLY: "Namaste! 🙏 How can I help you?" (or Hinglish: "Namaste! 🙏 Main aapki kaise madad kar sakta hoon?" if user used Hindi greeting).
+   - Do NOT add anything else.
+
+2. **GENERAL QUERIES & FOLLOW-UPS**:
+   - If the user asks a question (e.g., 'What is CCC?', 'Syllabus?'), answer it helpfully with CURRENT information.
+   - USE CONTEXT: If the user asks 'What is its fee?' immediately after 'CCC', assume they mean 'CCC Fee'.
+
+3. **PERSONAL/TEACHER TASKS** (Fees, Admissions, Call me):
+   - Reply: "Namaste! 🙏 Sir will personally reply to you regarding this as soon as he is free."
+
+4. **TONE**:
+   - Very polite, respectful, and encouraging.`;
 
 let sock;
 const chatHistory = {};
 let currentQR = null;
+
+// Call Groq API directly
+async function getAIResponse(userText, history) {
+    if (!GROQ_API_KEY) {
+        console.error('GROQ_API_KEY not set!');
+        return 'Sorry, AI service is not configured. Please contact the admin.';
+    }
+
+    const messages = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...history
+    ];
+
+    try {
+        const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+            model: 'llama-3.3-70b-versatile',
+            messages: messages
+        }, {
+            headers: {
+                'Authorization': `Bearer ${GROQ_API_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        return response.data.choices[0].message.content;
+    } catch (err) {
+        console.error('Groq API Error:', err.response?.data || err.message);
+        return 'Sorry, I am having trouble responding right now. Please try again later.';
+    }
+}
 
 // Health Check Endpoint
 app.get('/', (req, res) => {
@@ -25,7 +82,7 @@ app.get('/', (req, res) => {
 // Web QR Code Endpoint
 app.get('/qr', async (req, res) => {
     if (!currentQR) {
-        return res.send('<html><body><h1>No QR Code Generated Yet</h1><p>Wait for a few seconds or check if already connected.</p><script>setTimeout(() => location.reload(), 5000);</script></body></html>');
+        return res.send('<html><body><h1>No QR Code Available</h1><p>Either already connected or waiting for QR generation.</p><script>setTimeout(() => location.reload(), 5000);</script></body></html>');
     }
     try {
         const url = await QRCode.toDataURL(currentQR);
@@ -59,19 +116,19 @@ async function connectToWhatsApp() {
             currentQR = qr;
             console.log('\nScan the QR Code below to connect:\n');
             qrcodeTerminal.generate(qr, { small: true });
-            console.log('QR Code printed above. Please scan it with WhatsApp.');
+            console.log('QR Code printed above. Or visit /qr endpoint.');
         }
 
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect?.error instanceof Boom) ?
                 lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut : true;
 
-            console.log('Connection closed due to ', lastDisconnect?.error, ', reconnecting: ', shouldReconnect);
+            console.log('Connection closed, reconnecting:', shouldReconnect);
 
             if (shouldReconnect) {
                 connectToWhatsApp();
             } else {
-                console.log("Logged out. Delete 'auth_info_baileys' folder and restart to scan again.");
+                console.log("Logged out. Delete 'auth_info_baileys' folder and restart.");
             }
         } else if (connection === 'open') {
             currentQR = null;
@@ -95,55 +152,35 @@ async function connectToWhatsApp() {
                 text = m.message.extendedTextMessage.text;
             }
 
-            console.log(`📩 New Message from ${sender}: ${text}`);
+            if (!text) return;
 
+            console.log(`📩 Message from ${sender}: ${text}`);
+
+            // Initialize history
             if (!chatHistory[sender]) chatHistory[sender] = [];
             chatHistory[sender].push({ role: 'user', content: text });
             if (chatHistory[sender].length > 10) chatHistory[sender] = chatHistory[sender].slice(-10);
 
-            if (text) {
-                try {
-                    await axios.post(N8N_WEBHOOK_URL, {
-                        senderId: sender,
-                        userText: text,
-                        name: m.pushName || "User",
-                        history: chatHistory[sender]
-                    });
-                    console.log('   -> Forwarded to n8n');
-                } catch (err) {
-                    console.error('   ❌ Failed to send to n8n:', err.message);
-                }
-            }
+            // Get AI response directly
+            console.log('   -> Calling Groq AI...');
+            const aiReply = await getAIResponse(text, chatHistory[sender]);
+
+            // Send reply
+            await sock.sendMessage(sender, { text: aiReply });
+            console.log(`📤 Reply sent to ${sender}`);
+
+            // Add to history
+            chatHistory[sender].push({ role: 'assistant', content: aiReply });
+            if (chatHistory[sender].length > 10) chatHistory[sender] = chatHistory[sender].slice(-10);
+
         } catch (e) {
             console.error("Error processing message:", e);
         }
     });
 }
 
-// API to Send Message (Called by n8n)
-app.post('/send', async (req, res) => {
-    const { senderId, text } = req.body;
-
-    if (!senderId || !text) {
-        return res.status(400).json({ error: 'Missing senderId or text' });
-    }
-
-    try {
-        await sock.sendMessage(senderId, { text: text });
-        console.log(`📤 Reply sent to ${senderId}`);
-
-        if (!chatHistory[senderId]) chatHistory[senderId] = [];
-        chatHistory[senderId].push({ role: 'assistant', content: text });
-        if (chatHistory[senderId].length > 10) chatHistory[senderId] = chatHistory[senderId].slice(-10);
-
-        res.json({ status: 'success' });
-    } catch (err) {
-        console.error('Failed to send:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
 app.listen(PORT, () => {
-    console.log(`🚀 Bridge API running on port ${PORT}`);
+    console.log(`🚀 WhatsApp Bot running on port ${PORT}`);
+    console.log(`📱 Visit /qr to scan the QR code`);
     connectToWhatsApp();
 });
