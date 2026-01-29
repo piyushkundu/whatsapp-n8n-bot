@@ -4,13 +4,18 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const qrcodeTerminal = require('qrcode-terminal');
-const QRCode = require('qrcode'); // Re-added for Web View
+const QRCode = require('qrcode');
 const pino = require('pino');
-// ...
+
+const app = express();
+app.use(bodyParser.json());
+
+const PORT = process.env.PORT || 3000;
+const N8N_WEBHOOK_URL = 'http://127.0.0.1:5678/webhook/whatsapp';
 
 let sock;
 const chatHistory = {};
-let currentQR = null; // Store QR for Web View
+let currentQR = null;
 
 // Health Check Endpoint
 app.get('/', (req, res) => {
@@ -51,14 +56,25 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            currentQR = qr; // Save for Web View
+            currentQR = qr;
             console.log('\nScan the QR Code below to connect:\n');
             qrcodeTerminal.generate(qr, { small: true });
             console.log('QR Code printed above. Please scan it with WhatsApp.');
         }
 
-        if (connection === 'open') {
-            currentQR = null; // Clear QR on connection
+        if (connection === 'close') {
+            const shouldReconnect = (lastDisconnect?.error instanceof Boom) ?
+                lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut : true;
+
+            console.log('Connection closed due to ', lastDisconnect?.error, ', reconnecting: ', shouldReconnect);
+
+            if (shouldReconnect) {
+                connectToWhatsApp();
+            } else {
+                console.log("Logged out. Delete 'auth_info_baileys' folder and restart to scan again.");
+            }
+        } else if (connection === 'open') {
+            currentQR = null;
             console.log('✅ WhatsApp Connected!');
         }
     });
@@ -81,16 +97,10 @@ async function connectToWhatsApp() {
 
             console.log(`📩 New Message from ${sender}: ${text}`);
 
-            // Initialize history if needed
             if (!chatHistory[sender]) chatHistory[sender] = [];
-
-            // Add User Message
             chatHistory[sender].push({ role: 'user', content: text });
-
-            // Limit history (Keep last 10 messages)
             if (chatHistory[sender].length > 10) chatHistory[sender] = chatHistory[sender].slice(-10);
 
-            // Forward to n8n with History
             if (text) {
                 try {
                     await axios.post(N8N_WEBHOOK_URL, {
@@ -110,11 +120,6 @@ async function connectToWhatsApp() {
     });
 }
 
-// Health Check Endpoint (For UptimeRobot)
-app.get('/', (req, res) => {
-    res.send('Bot is Alive! 🟢');
-});
-
 // API to Send Message (Called by n8n)
 app.post('/send', async (req, res) => {
     const { senderId, text } = req.body;
@@ -127,10 +132,8 @@ app.post('/send', async (req, res) => {
         await sock.sendMessage(senderId, { text: text });
         console.log(`📤 Reply sent to ${senderId}`);
 
-        // Add Assistant Message to History
         if (!chatHistory[senderId]) chatHistory[senderId] = [];
         chatHistory[senderId].push({ role: 'assistant', content: text });
-        // Limit history
         if (chatHistory[senderId].length > 10) chatHistory[senderId] = chatHistory[senderId].slice(-10);
 
         res.json({ status: 'success' });
